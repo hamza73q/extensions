@@ -1,0 +1,59 @@
+name: Sync SFW extensions
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone upstream repo branch
+        run: |
+          git clone --depth 1 --branch repo \
+            https://github.com/keiyoushi/extensions.git upstream
+
+      - name: Remove NSFW extensions
+        run: |
+          python3 - <<'EOF'
+          import json, os
+
+          d = "upstream"
+          with open(f"{d}/index.min.json", encoding="utf-8") as f:
+              data = json.load(f)
+
+          keep = [e for e in data if not e.get("nsfw")]
+          drop = [e for e in data if e.get("nsfw")]
+
+          for e in drop:
+              for p in (f"{d}/apk/{e['apk']}", f"{d}/icon/{e['pkg']}.png"):
+                  if os.path.exists(p):
+                      os.remove(p)
+
+          with open(f"{d}/index.min.json", "w", encoding="utf-8") as f:
+              json.dump(keep, f, ensure_ascii=False, separators=(",", ":"))
+          with open(f"{d}/index.json", "w", encoding="utf-8") as f:
+              json.dump(keep, f, ensure_ascii=False, indent=2)
+
+          pb = f"{d}/index.pb"
+          if os.path.exists(pb):
+              os.remove(pb)
+
+          print(f"kept {len(keep)}, removed {len(drop)}")
+          EOF
+
+      - name: Publish to repo branch
+        run: |
+          cd upstream
+          rm -rf .git
+          git init -b repo
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Sync SFW extensions"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push -f origin repo
